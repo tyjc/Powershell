@@ -1,0 +1,4 @@
+formula to concat and format a mobile number from 9-digit string (add zero and space)
+	=CONCAT(0,(LEFT(D2,3))," ",(MID(D2,4,3))," ", (RIGHT(D2,3)))
+formula to concat add format a phone number from 9-digit string (add brackets, zero, and spaces)
+	=CONCAT("(0",(LEFT(C3,1)),")"," ",(MID(C3,2,4))," ",(RIGHT(C3,4)))
