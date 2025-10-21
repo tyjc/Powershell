@@ -1,36 +1,35 @@
-# Function to write log messages to a dated text file
 function Write-Log {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Message,  # The message text to log
+        [string]$Message,  # The message to log
 
         [Parameter()]
         [ValidateNotNullOrEmpty()]
-        [string]$LogFilePath = "C:\\Scripts\\IntuneLogs",  # Default log directory path
+        [string]$LogFilePath = "C:\\Scripts\\IntuneLogs",  # Default log directory
 
         [Parameter()]
         [ValidateSet('Information', 'Warning', 'Error')]
-        [string]$Level = "Information"  # Message severity level
+        [string]$Level = "Information"  # Log level
     )
 
-    # Create the log directory if it doesn't already exist
+    # Create the log directory if it doesn't exist
     if (!(Test-Path $LogFilePath)) {
         New-Item -Path $LogFilePath -ItemType Directory -Force | Out-Null
     }
 
-    # Create a log filename with the current date
+    # Build the log file path with current date
     $date = Get-Date -Format "MM-dd-yyyy"
-    $logFile = Join-Path $LogFilePath "log-$date.txt"
+    $logFile = Join-Path $LogFilePath "$ScriptName log-$date.txt"
 
-    # Capture the current time for the log entry
+    # Get the current timestamp for the log entry
     $timeStamp = Get-Date -Format "HH:mm:ss"
 
-    # Format the log entry string
+    # Create the formatted log entry
     $logEntry = "$timeStamp [$Level] - $Message"
 
-    # Try to write the log entry to the file, and handle any errors
     try {
+        # Append the log entry to the file
         Add-Content -Path $logFile -Value $logEntry -ErrorAction Stop
     }
     catch {
@@ -38,10 +37,17 @@ function Write-Log {
     }
 }
 
-# Initial log entry indicating start of the process
+$ScriptName = 'UploadToSnipe'  # Script name used in log file
+
+# Check if the "UploadedtoSnipe" tag exists; exit if it does
+if (Get-Content -Path C:\Scripts\IntuneLogs\UploadedtoSnipe.tag) {
+    Write-Log -Message "Device already uploaded to Snipe, exiting"
+    break
+}
+
 Write-Log -Message "Attempting to upload device details to SnipeIT..."
 
-# Table mapping model names to their SnipeIT Model ID numbers
+# Mapping of computer model names to internal SnipeIT IDs
 $ReplaceTable = @{
     "OptiPlex 3020"                             = "24"
     "HP EliteDesk 800 G6 DM"                    = "10"
@@ -62,7 +68,7 @@ $ReplaceTable = @{
     "HP Elite Mini 800 G9 Desktop PC"           = "40"
 }       
 
-# Attempt to get detailed system information and handle failure
+# Attempt to retrieve local computer information
 try {
     $ComputerInfo = Get-ComputerInfo -ErrorAction Stop
 }
@@ -71,49 +77,52 @@ catch {
     break
 }
 
-# Log progress message
 Write-Log -Message "Creating hashtable of device details"
 
-# Create a hashtable with device details for SnipeIT upload
+# Build a hashtable with computer details to send to SnipeIT
 $ComputerDetails = @{
-    name         = $computerInfo.CsName                  # Computer name
-    manufacturer = $computerInfo.CsManufacturer          # Manufacturer name
-    model_id     = $computerInfo.CsModel                 # Model name (to be replaced with SnipeIT ID)
-    serial       = $computerInfo.BiosSeralNumber         # BIOS serial number
-    status_id    = 4                                     # Default asset status in SnipeIT
-    notes        = 'Uploaded via IntuneScript'           # Note for record tracking
+    name         = $computerInfo.CsName
+    manufacturer = $computerInfo.CsManufacturer
+    model_id     = $computerInfo.CsModel
+    serial       = $computerInfo.BiosSeralNumber
+    status_id    = 4
+    notes        = 'Uploaded via IntuneScript'
 }
 
-# Log that the hashtable is created
 Write-Log -Message "Hashtable created"
 
-# Log that model ID replacement process is starting
 Write-Log -Message "Replacing computer model name with internal Snipe ID"
 
-# Loop through the model replacement table and replace model names with corresponding SnipeIT IDs
-foreach ($object in $ReplaceTable) {
-    $ReplaceTable.GetEnumerator() | % {
-        $ComputerDetails.model_id = $ComputerDetails.model_id -replace $_.Key, $_.Value
-    }
+# Loop through each key-value pair in the ReplaceTable
+# If the computer's model matches the key, replace it with the SnipeIT ID
+foreach ($entry in $ReplaceTable.GetEnumerator()) {
+    $ComputerDetails.model_id = $ComputerDetails.model_id -replace $entry.Key, $entry.Value
 }
 
-# Log start of API request preparation
-Write-Log -Message "Building API POST request..."
+Write-Log -Message "Building API POST request"
 
-# Convert hashtable to JSON format for API request body
+# Convert hashtable to JSON and prepare headers for the API request
 $hashbody = $ComputerDetails | ConvertTo-Json
-
-# Build the HTTP headers for the SnipeIT API call
 $headers = @{}
 $headers.Add("accept", "application/json")
-$headers.Add("Authorization", "Bearer Token")  # Placeholder for actual SnipeIT API token
+$headers.Add("Authorization", "Bearer ---")
 $headers.Add("content-type", "application/json")
 
-# Log before sending POST request
-Write-Log -Message "Attempting to POST to SnipeIT..."
+Write-Log -Message "Attempting to POST to SnipeIT"
 
-# Perform the POST request to upload data to SnipeIT
-$response = Invoke-WebRequest -Uri 'http://inventory.sjs.local/api/v1/hardware' -Method POST -Headers $headers -ContentType 'application/json' -Body $hashbody
+# Send the POST request to SnipeIT API
+try {
+    $response = Invoke-WebRequest -Uri 'http://inventory.sjs.local/api/v1/hardware' -Method POST -Headers $headers -ContentType 'application/json' -Body $hashbody
+}
+catch {
+    Write-Log -Message "Failed to Upload to Snipe" -Level Error
+    Break
+}
 
-# Log the response code and description for verification
+Write-Log -Message "Setting tag to mark job complete"
+
+# Create a file to indicate the upload was successful
+Set-Content -Path "C:\\Scripts\\IntuneLogs\\UploadedtoSnipe.tag" -Value "TRUE"
+
+# Log the response from the API
 Write-Log -Message "Response code: $($response.StatusCode) Response Description: $($response.StatusDescription)"
